@@ -65,13 +65,14 @@ def rsa_decrypt(cipher, private_key):
 
 # for registration, the client will create variable in its dictionary that
 # will take 3 variable, the username , the public key and private key
-thename,ppl,private = create_keys("sam")
-#print(thename)
+user_name,pub_key,priv_key = create_keys("sam")
 
+# for testing, will remove in the end
 msg1 = "Insert you msg here"
 print(msg1)
-cipherMsg = rsa_encryption(msg1,ppl)
+cipherMsg = rsa_encryption(msg1,pub_key)
 print(cipherMsg)
 
-leplain = rsa_decrypt(cipherMsg,private)
+leplain = rsa_decrypt(cipherMsg,priv_key)
+
 print(leplain)
