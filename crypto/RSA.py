@@ -84,11 +84,6 @@ def rsa_str_decrypt(cipher, priv_key):
 # will take 3 variable, the username , the public key and private key
 user_name, public_key, private_key = create_keys("sam")
 
-# creating an random AES key of size 32 bytes = AES-256
-def aes_key_creation():
-    aes_key = os.urandom(32)
-    return aes_key
-
 #Testing AES key encryption / decryption and making sure the decryption function returns a type(Byte)
 
 data = aes_key_creation()
@@ -107,3 +102,4 @@ encrypted_string_rsa = rsa_encryption(data_string,public_key)
 print(encrypted_string_rsa)
 decrypted_string_rsa = rsa_str_decrypt(encrypted_string_rsa,private_key)
 print(decrypted_string_rsa)
+
