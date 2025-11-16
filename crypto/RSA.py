@@ -2,7 +2,6 @@ import math
 from Crypto.Util import number
 import random
 import ast
-import os
 
 
 #Generate Random Prime numbers
@@ -80,6 +79,7 @@ def rsa_str_decrypt(cipher, priv_key):
     decrypted_text = "".join (chr(ch) for ch in cipher_encoded)
     return decrypted_text
 
+
 # for registration, the client will create variable in its dictionary that
 # will take 3 variable, the username , the public key and private key
 user_name, public_key, private_key = create_keys("sam")
@@ -90,12 +90,14 @@ def aes_key_creation():
     return aes_key
 
 #Testing AES key encryption / decryption and making sure the decryption function returns a type(Byte)
+
 data = aes_key_creation()
 print(data)
 encrypted_aes_key_rsa = rsa_encryption(data,public_key)
 print(encrypted_aes_key_rsa)
 decrypted_aes_key_rsa = rsa_aes_decrypt(encrypted_aes_key_rsa,private_key)
 print(decrypted_aes_key_rsa)
+
 
 #Testing String encryption / decryption and making sure the decryption function returns the original String
 
@@ -105,11 +107,3 @@ encrypted_string_rsa = rsa_encryption(data_string,public_key)
 print(encrypted_string_rsa)
 decrypted_string_rsa = rsa_str_decrypt(encrypted_string_rsa,private_key)
 print(decrypted_string_rsa)
-
-#msg1 = "Insert you msg here"
-#print(msg1)
-#cipherMsg = rsa_str_encryption(msg1,public_key)
-#print(cipherMsg)
-
-#leplain = rsa_str_decrypt(cipherMsg,private_key)
-#print(leplain)
