@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # In-memory "database"
 users = []
@@ -108,6 +108,6 @@ def fetch_inbox(username):
         return jsonify("Internal server error"), 500
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
 
