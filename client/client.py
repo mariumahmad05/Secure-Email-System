@@ -8,9 +8,7 @@ from tkinter import ttk, messagebox, scrolledtext
 from Crypto.Cipher import AES
 from Crypto.Hash import SHA256
 
-# ---------------------------------------------
 # IMPORT CRYPTO MODULE
-# ---------------------------------------------
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 from crypto.full_encryption import *
@@ -18,9 +16,7 @@ from crypto.full_encryption import *
 SERVER_URL = "http://127.0.0.1:5000"
 USER_STORE = os.path.join(PROJECT_ROOT, "client", "users.json")
 
-# ===================================================
 # AES UTILS FOR PASSWORD-ENCRYPTING PRIVATE KEY
-# ===================================================
 def encrypt_private_key(sk, password):
     key = SHA256.new(password.encode()).digest()
     cipher = AES.new(key, AES.MODE_CTR)
@@ -35,9 +31,7 @@ def decrypt_private_key(enc_data, password):
     decrypted = cipher.decrypt(base64.b64decode(enc_data["cipher"]))
     return json.loads(decrypted.decode())
 
-# ===================================================
 # LOAD / SAVE USERS
-# ===================================================
 def load_users():
     if not os.path.exists(USER_STORE):
         return {}
@@ -46,9 +40,7 @@ def load_users():
 def save_users(users):
     json.dump(users, open(USER_STORE, "w"), indent=4)
 
-# ===================================================
 # SERVER API
-# ===================================================
 def api_register(username, pubkey):
     try:
         r = requests.post(f"{SERVER_URL}/register", json={"username": username, "pubkey": pubkey})
@@ -80,9 +72,7 @@ def api_inbox(username):
     except:
         return []
 
-# ===================================================
 # GLOBAL SESSION
-# ===================================================
 LOGGED_IN = None
 PRIVATE_KEY = None
 PUBLIC_KEY = None
@@ -90,9 +80,7 @@ PUBLIC_KEY = None
 def get_username():
     return LOGGED_IN if LOGGED_IN else ""
 
-# ===================================================
 # REGISTER / LOGIN / LOGOUT FUNCTIONS
-# ===================================================
 def register_user(username, password):
     global LOGGED_IN, PRIVATE_KEY, PUBLIC_KEY
     users = load_users()
@@ -128,9 +116,8 @@ def logout_user():
     PRIVATE_KEY = None
     PUBLIC_KEY = None
 
-# ===================================================
 # SEND EMAIL
-# ===================================================
+
 def send_secure_message(to_user, subject, msg_text):
     recipient_pub = api_get_pubkey(to_user)
     if not recipient_pub:
@@ -152,9 +139,7 @@ def send_secure_message(to_user, subject, msg_text):
     }
     return api_send(packet), "Sent."
 
-# ===================================================
 # INBOX
-# ===================================================
 def fetch_user_inbox():
     inbox = api_inbox(LOGGED_IN)
     out = ""
@@ -170,9 +155,7 @@ def fetch_user_inbox():
         out += f"\nFrom: {sender}\nSubject: {subject}\nVerified: {valid}\nMessage:\n{plaintext}\n{'-'*40}\n"
     return out
 
-# ===================================================
 # GUI WITH PAGE SWITCHING
-# ===================================================
 class App:
     def __init__(self, root):
         self.root = root
@@ -313,9 +296,8 @@ class InboxPage(tk.Frame):
         self.box.delete("1.0", tk.END)
         self.box.insert(tk.END, fetch_user_inbox())
 
-# ===================================================
+
 # RUN APP
-# ===================================================
 root = tk.Tk()
 App(root)
 root.mainloop()
