@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify
+from Crypto.Hash import SHA256
 
 app = Flask(__name__)
 
 # In-memory "database"
-users = []
+users = []       # now stores username + password_hash + pubkey
 inbox = {}
 
 def validate_body(data, required):
@@ -16,30 +17,46 @@ def validate_body(data, required):
 
     return None
 
-
 def find_user(username):
     for u in users:
         if u["username"] == username:
             return u
     return None
 
+# 🔹 Added SHA-256 password hashing
+def hash_password(password):
+    h = SHA256.new()
+    h.update(password.encode())
+    return h.hexdigest()
 
+
+# 🔹 UPDATED: Registration now needs username + password + pubkey
 @app.route("/register", methods=["POST"])
 def register_user():
+    """
+    Required JSON:
+    {
+        "username": "...",
+        "password": "...",
+        "pubkey": [...]
+    }
+    """
     try:
         data = request.get_json()
-        err = validate_body(data, ["username", "pubkey"])
+        err = validate_body(data, ["username", "password", "pubkey"])
         if err:
             return err
 
         username = data["username"]
+        password = data["password"]
         pubkey = data["pubkey"]
 
         if find_user(username):
             return jsonify("User already exists"), 409
 
         users.append({
-            "username": username, 
+            "username": username,
+            "password_hash": hash_password(password),   # 🔥 saved hashed
             "pubkey": pubkey
         })
 
@@ -47,7 +64,42 @@ def register_user():
     except Exception:
         return jsonify("Internal server error"), 500
 
+# 🔹 NEW ENDPOINT: Login
+@app.route("/login", methods=["POST"])
+def login():
+    """
+    Required JSON:
+    {
+        "username": "...",
+        "password": "..."
+    }
+    Returns public key on success.
+    """
+    try:
+        data = request.get_json()
+        err = validate_body(data, ["username", "password"])
+        if err:
+            return err
 
+        username = data["username"]
+        password = data["password"]
+
+        user = find_user(username)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        if user["password_hash"] != hash_password(password):
+            return jsonify({"error": "Wrong password"}), 403
+
+        return jsonify({
+            "status": "ok",
+            "pubkey": user["pubkey"]
+        }), 200
+
+    except:
+        return jsonify("Internal server error"), 500
+
+# PUBLIC KEY FETCH (unchanged)
 @app.route("/pubkey/<recipient>", methods=["GET"])
 def get_public_key(recipient):
     try:
@@ -59,7 +111,7 @@ def get_public_key(recipient):
     except Exception:
         return jsonify("Internal server error"), 500
 
-
+# SEND MESSAGE (unchanged)
 @app.route("/send", methods=["POST"])
 def send_message():
     try:
@@ -95,7 +147,7 @@ def send_message():
     except Exception:
         return jsonify("Internal server error"), 500
 
-
+# INBOX 
 @app.route("/inbox/<username>", methods=["GET"])
 def fetch_inbox(username):
     try:
@@ -107,7 +159,6 @@ def fetch_inbox(username):
     except Exception as e:
         return jsonify("Internal server error"), 500
 
-
+# RUN SERVER
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
-
