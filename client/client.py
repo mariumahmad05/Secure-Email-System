@@ -2,68 +2,93 @@ import sys
 import os
 import json
 import base64
-import requests
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
-from Crypto.Cipher import AES
-from Crypto.Hash import SHA256
+import requests
 
-# IMPORT CRYPTO METHODS
+# Import crypto functions
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 from crypto.full_encryption import *
 
+# Files & Server
 SERVER_URL = "http://127.0.0.1:5000"
 USER_STORE = os.path.join(PROJECT_ROOT, "client", "users.json")
 
-# AES ENCRYPTION FOR LOCAL PRIVATE KEY STORAGE
+
+#   AES encryption for PRIVATE KEY STORAGE
+
 def encrypt_private_key(sk, password):
-    key = SHA256.new(password.encode()).digest()
-    cipher = AES.new(key, AES.MODE_CTR)
-    encrypted = cipher.encrypt(json.dumps(sk).encode())
+    """
+    Encrypt the RSA private key (sk) using a key derived from the password.
+    - Derive AES key from SHA-256(password) hex digest -> 32 bytes
+    - Use the aes_encryption_of_msg (AES-CTR) to encrypt JSON(sk)
+    - Store nonce and ciphertext as base64 strings
+    """
+    # SHA-256(password) returns hex string (64 chars -> 32 bytes)
+    key_hex = hash_string_sha256(password)        
+    aes_key = bytes.fromhex(key_hex)             
+
+    # Convert private key tuple to JSON string
+    plaintext = json.dumps(sk)                    
+
+    # Encrypt using your AES wrapper
+    ciphertext, nonce = aes_encryption_of_msg(plaintext, aes_key)
+
     return {
-        "nonce": base64.b64encode(cipher.nonce).decode(),
-        "cipher": base64.b64encode(encrypted).decode()
+        "nonce": base64.b64encode(nonce).decode(),
+        "cipher": base64.b64encode(ciphertext).decode()
     }
 
-def decrypt_private_key(enc, password):
-    key = SHA256.new(password.encode()).digest()
-    nonce = base64.b64decode(enc["nonce"])
-    cipher = AES.new(key, AES.MODE_CTR, nonce=nonce)
-    decrypted = cipher.decrypt(base64.b64decode(enc["cipher"]))
-    return json.loads(decrypted.decode())
 
-# LOAD/SAVE LOCAL USER DATA
+def decrypt_private_key(enc, password):
+    """
+    Decrypt the RSA private key encrypted with encrypt_private_key.
+    - Derive AES key again from SHA-256(password)
+    - Base64 decode nonce and ciphertext
+    - Decrypt using aes_decryption_of_msg
+    - Parse JSON back to Python object (sk)
+    """
+    key_hex = hash_string_sha256(password)
+    aes_key = bytes.fromhex(key_hex)
+
+    nonce = base64.b64decode(enc["nonce"])
+    cipher_bytes = base64.b64decode(enc["cipher"])
+
+    plaintext = aes_decryption_of_msg(cipher_bytes, nonce, aes_key)  
+    return json.loads(plaintext)
+
+
+#   LOCAL USER STORAGE
 def load_users():
     if not os.path.exists(USER_STORE):
         return {}
     return json.load(open(USER_STORE))
 
+
 def save_users(data):
     json.dump(data, open(USER_STORE, "w"), indent=4)
 
-# SERVER API CALLS
+
+#   SERVER API CALLS
 def api_register(username, password, pubkey):
-    body = {
-        "username": username,
-        "password": password,
-        "pubkey": pubkey
-    }
+    body = {"username": username, "password": password, "pubkey": pubkey}
     try:
         r = requests.post(f"{SERVER_URL}/register", json=body)
         return r.status_code
     except:
         return None
 
+
 def api_login(username, password):
-    body = {"username": username, "password": password}
     try:
-        r = requests.post(f"{SERVER_URL}/login", json=body)
+        r = requests.post(f"{SERVER_URL}/login", json={"username": username, "password": password})
         if r.status_code == 200:
-            return r.json()["pubkey"]
+            return r.json().get("pubkey")
         return None
     except:
         return None
+
 
 def api_get_pubkey(username):
     try:
@@ -74,12 +99,14 @@ def api_get_pubkey(username):
     except:
         return None
 
+
 def api_send(data):
     try:
         r = requests.post(f"{SERVER_URL}/send", json=data)
         return r.status_code == 200
     except:
         return False
+
 
 def api_inbox(username):
     try:
@@ -90,26 +117,35 @@ def api_inbox(username):
     except:
         return []
 
-# SESSION VARIABLES
+
+#   SESSION VARIABLES
 LOGGED_IN = None
 PRIVATE_KEY = None
 PUBLIC_KEY = None
 
+
 def get_username():
     return LOGGED_IN if LOGGED_IN else ""
 
-# REGISTER / LOGIN / LOGOUT
+
+#   REGISTER / LOGIN / LOGOUT
 def register_user(username, password):
+    """
+    - Generate RSA keys (create_keys)
+    - Encrypt private key with password (AES-CTR + SHA-256)
+    - Store encrypted private key + public key in users.json
+    - Send username + password + pubkey to server
+    """
     global LOGGED_IN, PRIVATE_KEY, PUBLIC_KEY
 
     users = load_users()
     if username in users:
-        return False, "User already registered locally."
+        return False, "Already registered locally."
 
-    # generate RSA keys
+    # create RSA keys
     _, pk, sk = create_keys(username)
 
-    # save private key encrypted locally
+    # encrypt private key locally
     encrypted_sk = encrypt_private_key(sk, password)
     users[username] = {
         "public_key": pk,
@@ -117,32 +153,36 @@ def register_user(username, password):
     }
     save_users(users)
 
-    # send to server
     result = api_register(username, password, pk)
     if result == 200:
         LOGGED_IN = username
         PRIVATE_KEY = sk
         PUBLIC_KEY = pk
-        return True, "Registered successfully."
+        return True, "Registration successful."
 
     return False, "Server error."
 
+
 def login_user(username, password):
+    """
+    - Check user exists locally
+    - Ask server to verify username + password
+    - Decrypt private key from users.json using password
+    """
     global LOGGED_IN, PRIVATE_KEY, PUBLIC_KEY
 
     users = load_users()
     if username not in users:
         return False, "User not registered locally."
 
-    # ask server to verify password
     server_pub = api_login(username, password)
     if server_pub is None:
-        return False, "Wrong password or user does not exist on server."
+        return False, "Wrong password or user not on server."
 
-    # decrypt private key from local storage
+    # decrypt local private key
     try:
         PRIVATE_KEY = decrypt_private_key(users[username]["encrypted_private_key"], password)
-    except:
+    except Exception:
         return False, "Incorrect password (local decryption failed)."
 
     PUBLIC_KEY = users[username]["public_key"]
@@ -150,19 +190,29 @@ def login_user(username, password):
 
     return True, "Login successful."
 
+
 def logout_user():
     global LOGGED_IN, PRIVATE_KEY, PUBLIC_KEY
     LOGGED_IN = None
     PRIVATE_KEY = None
     PUBLIC_KEY = None
 
-# SECURE EMAIL FUNCTIONS
+
+#   SECURE EMAIL SYSTEM
 def send_secure_message(to_user, subject, msg_text):
+    """
+    - Get recipient's public key from server
+    - Generate AES session key
+    - Encrypt message with AES 
+    - Encrypt AES key with RSA (recipient's pk)
+    - Create digital signature = RSA_encrypt(hash(msg), sender sk)
+    - Send everything to server
+    """
     recipient_pub = api_get_pubkey(to_user)
     if not recipient_pub:
         return False, "Recipient not found."
 
-    # AES key
+    # AES key for message
     aes_key = aes_key_creation()
 
     # encrypt message
@@ -187,40 +237,55 @@ def send_secure_message(to_user, subject, msg_text):
     }
 
     ok = api_send(packet)
-    return ok, "Email sent." if ok else "Failed to send"
+    return ok, "Sent." if ok else "Failed."
+
 
 def fetch_user_inbox():
+    """
+    For each message:
+    - Decrypt AES key using RSA (recipient's sk)
+    - Decrypt ciphertext using AES 
+    - Verify digital signature:
+        hash(plaintext) == RSA_decrypt(signature, sender pk)
+    """
     inbox = api_inbox(LOGGED_IN)
-    out = ""
+    output = ""
+
     for msg in inbox:
         sender = msg["sender"]
         subject = msg["subject"]
+
         ciphertext = bytes(msg["ciphertext"])
         nonce = bytes(msg["iv"])
 
-        # decrypt AES key
+        # Decrypt AES key
         aes_key = rsa_aes_decrypt(msg["enc_aes_key"], PRIVATE_KEY)
 
-        # decrypt message
+        # Decrypt message
         plaintext = aes_decryption_of_msg(ciphertext, nonce, aes_key)
 
-        # verify signature
+        # Verify signature
         sender_pub = api_get_pubkey(sender)
         digest_local = hash_string_sha256(plaintext)
         digest_sender = rsa_str_decrypt(msg["signature"], sender_pub)
 
         verified = (digest_local == digest_sender)
 
-        out += f"From: {sender}\nSubject: {subject}\nVerified: {verified}\nMessage:\n{plaintext}\n{'-'*40}\n"
+        output += (
+            f"\nFrom: {sender}\nSubject: {subject}\nVerified: {verified}\n"
+            f"Message:\n{plaintext}\n{'-'*40}\n"
+        )
 
-    return out
+    return output
 
-# GUI (PAGE-BASED)
+
+#   GUI (Page-based Navigation)
+
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Secure Email System")
-        self.root.geometry("500x500")
+        root.title("Secure Email System")
+        root.geometry("500x500")
 
         self.frames = {}
         for F in (HomePage, RegisterPage, LoginPage, DashboardPage, SendPage, InboxPage):
@@ -236,18 +301,20 @@ class App:
             frame.on_show()
         frame.tkraise()
 
-# -------------------- HOME -------------------------
+
+# ---------------- HOME PAGE ----------------
 class HomePage(tk.Frame):
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
-        tk.Label(self, text="Secure Email System", font=("Arial", 18)).pack(pady=50)
+        super().__init__(parent)
+        tk.Label(self, text="Secure Email System", font=("Arial", 18)).pack(pady=60)
         ttk.Button(self, text="Register", command=lambda: controller.show(RegisterPage)).pack(pady=10)
         ttk.Button(self, text="Login", command=lambda: controller.show(LoginPage)).pack(pady=10)
 
-# -------------------- REGISTER ---------------------
+
+# ---------------- REGISTER PAGE ----------------
 class RegisterPage(tk.Frame):
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
+        super().__init__(parent)
         tk.Label(self, text="Register", font=("Arial", 16)).pack(pady=20)
 
         tk.Label(self, text="Username").pack()
@@ -268,7 +335,7 @@ class RegisterPage(tk.Frame):
         self.e_pass.delete(0, tk.END)
 
     def register(self):
-        u, p = self.e_user.get().strip(), self.e_pass.get().strip()
+        u, p = self.e_user.get(), self.e_pass.get()
         ok, msg = register_user(u, p)
         if ok:
             messagebox.showinfo("Success", msg)
@@ -276,10 +343,11 @@ class RegisterPage(tk.Frame):
         else:
             messagebox.showerror("Error", msg)
 
-# -------------------- LOGIN ------------------------
+
+# ---------------- LOGIN PAGE ----------------
 class LoginPage(tk.Frame):
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
+        super().__init__(parent)
         tk.Label(self, text="Login", font=("Arial", 16)).pack(pady=20)
 
         tk.Label(self, text="Username").pack()
@@ -300,7 +368,7 @@ class LoginPage(tk.Frame):
         self.e_pass.delete(0, tk.END)
 
     def login(self):
-        u, p = self.e_user.get().strip(), self.e_pass.get().strip()
+        u, p = self.e_user.get(), self.e_pass.get()
         ok, msg = login_user(u, p)
         if ok:
             messagebox.showinfo("Success", msg)
@@ -308,13 +376,14 @@ class LoginPage(tk.Frame):
         else:
             messagebox.showerror("Error", msg)
 
-# -------------------- DASHBOARD --------------------
+
+# ---------------- DASHBOARD ----------------
 class DashboardPage(tk.Frame):
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
+        super().__init__(parent)
 
         self.lbl_user = tk.Label(self, text="", font=("Arial", 14))
-        self.lbl_user.pack(pady=15)
+        self.lbl_user.pack(pady=20)
 
         ttk.Button(self, text="Send Email", command=lambda: controller.show(SendPage)).pack(pady=10)
         ttk.Button(self, text="Inbox", command=lambda: controller.show(InboxPage)).pack(pady=10)
@@ -327,16 +396,17 @@ class DashboardPage(tk.Frame):
 
     def logout(self):
         logout_user()
-        messagebox.showinfo("Logout", "You have been logged out.")
+        messagebox.showinfo("Logout", "You are logged out.")
         self.controller.show(HomePage)
 
-# -------------------- SEND PAGE --------------------
+
+# ---------------- SEND PAGE ----------------
 class SendPage(tk.Frame):
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
+        super().__init__(parent)
 
         self.lbl_user = tk.Label(self, text="", font=("Arial", 14))
-        self.lbl_user.pack(pady=5)
+        self.lbl_user.pack(pady=10)
 
         tk.Label(self, text="Recipient").pack()
         self.e_to = tk.Entry(self)
@@ -350,7 +420,7 @@ class SendPage(tk.Frame):
         self.t_msg = scrolledtext.ScrolledText(self, width=45, height=10)
         self.t_msg.pack()
 
-        ttk.Button(self, text="Send", command=self.send_message).pack(pady=10)
+        ttk.Button(self, text="Send", command=self.send_it).pack(pady=10)
         ttk.Button(self, text="Back", command=lambda: controller.show(DashboardPage)).pack()
 
         self.controller = controller
@@ -361,28 +431,28 @@ class SendPage(tk.Frame):
         self.e_sub.delete(0, tk.END)
         self.t_msg.delete("1.0", tk.END)
 
-    def send_message(self):
-        to = self.e_to.get().strip()
-        sub = self.e_sub.get().strip()
+    def send_it(self):
+        to = self.e_to.get()
+        sub = self.e_sub.get()
         msg = self.t_msg.get("1.0", tk.END).strip()
 
         ok, info = send_secure_message(to, sub, msg)
-
         if ok:
             messagebox.showinfo("Success", info)
             self.controller.show(DashboardPage)
         else:
             messagebox.showerror("Error", info)
 
-# -------------------- INBOX PAGE -------------------
+
+# ---------------- INBOX PAGE ----------------
 class InboxPage(tk.Frame):
     def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent)
+        super().__init__(parent)
 
         self.lbl_user = tk.Label(self, text="", font=("Arial", 14))
-        self.lbl_user.pack(pady=5)
+        self.lbl_user.pack(pady=10)
 
-        self.box = scrolledtext.ScrolledText(self, width=50, height=15)
+        self.box = scrolledtext.ScrolledText(self, width=50, height=18)
         self.box.pack()
 
         ttk.Button(self, text="Refresh", command=self.load_inbox).pack(pady=10)
@@ -399,7 +469,7 @@ class InboxPage(tk.Frame):
         self.box.insert(tk.END, fetch_user_inbox())
 
 
-# RUN APP
+#  Run
 root = tk.Tk()
 App(root)
 root.mainloop()
